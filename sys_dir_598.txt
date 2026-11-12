@@ -1,0 +1,814 @@
+C NETWORK PROGRAMMING LAB
+EXPERIMENTS 5 TO 10
+Linux / Ubuntu - C language
+
+IMPORTANT
+---------
+1. Save each program using the filename shown above it.
+2. Open two or more terminals for server and client programs.
+3. Compile using the gcc commands given below each experiment.
+4. Use 127.0.0.1 when server and client run on the same computer.
+5. For a different computer, replace 127.0.0.1 in the client with the
+   server computer's IP address.
+6. For Experiment 10, run the packet sniffer using sudo because raw
+   sockets require administrator privileges.
+
+============================================================
+EXPERIMENT 5
+TCP CLIENT-SERVER: SQUARE MATRIX CLASSIFICATION
+============================================================
+
+SERVER: exp5_server.c
+---------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int s, c, n, a[10][10], i, j;
+    int upper = 1, lower = 1, diagonal = 1;
+    struct sockaddr_in server, client;
+    socklen_t len = sizeof(client);
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5005);
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    bind(s, (struct sockaddr *)&server, sizeof(server));
+    listen(s, 5);
+
+    printf("Matrix server waiting...\n");
+    c = accept(s, (struct sockaddr *)&client, &len);
+
+    recv(c, &n, sizeof(n), 0);
+    recv(c, a, sizeof(int) * n * n, MSG_WAITALL);
+
+    for(i = 0; i < n; i++)
+    {
+        for(j = 0; j < n; j++)
+        {
+            if(i > j && a[i][j] != 0)
+                upper = 0;
+
+            if(i < j && a[i][j] != 0)
+                lower = 0;
+
+            if(i != j && a[i][j] != 0)
+                diagonal = 0;
+        }
+    }
+
+    char result[30];
+
+    if(diagonal)
+        sprintf(result, "Diagonal matrix");
+    else if(upper)
+        sprintf(result, "Upper triangular matrix");
+    else if(lower)
+        sprintf(result, "Lower triangular matrix");
+    else
+        sprintf(result, "Neither triangular nor diagonal");
+
+    send(c, result, sizeof(result), 0);
+
+    printf("Result sent: %s\n", result);
+
+    close(c);
+    close(s);
+    return 0;
+}
+
+
+CLIENT: exp5_client.c
+---------------------
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int s, n, a[10][10], i, j;
+    char result[30];
+    struct sockaddr_in server;
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5005);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    connect(s, (struct sockaddr *)&server, sizeof(server));
+
+    printf("Enter order of matrix (max 10): ");
+    scanf("%d", &n);
+
+    if(n < 1 || n > 10)
+    {
+        printf("Invalid order\n");
+        close(s);
+        return 0;
+    }
+
+    printf("Enter matrix elements:\n");
+    for(i = 0; i < n; i++)
+        for(j = 0; j < n; j++)
+            scanf("%d", &a[i][j]);
+
+    send(s, &n, sizeof(n), 0);
+    send(s, a, sizeof(int) * n * n, 0);
+
+    recv(s, result, sizeof(result), 0);
+    printf("Server says: %s\n", result);
+
+    close(s);
+    return 0;
+}
+
+COMPILE AND RUN
+---------------
+gcc exp5_server.c -o server
+gcc exp5_client.c -o client
+
+Terminal 1: ./server
+Terminal 2: ./client
+
+Example diagonal matrix:
+1 0 0
+0 2 0
+0 0 3
+
+
+============================================================
+EXPERIMENT 6
+UDP ABBREVIATION TRANSLATOR
+============================================================
+
+SERVER: exp6_server.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int s, i;
+    char msg[1024], result[1024];
+    char *word;
+    struct sockaddr_in server, client;
+    socklen_t len = sizeof(client);
+
+    char *shortform[] = {
+        "tbh", "ig", "tbf", "atm", "irl",
+        "lol", "asap", "omg", "ttyl", "idk", "nvm"
+    };
+
+    char *meaning[] = {
+        "to be honest", "I guess", "to be fair",
+        "at the moment", "in real life", "laughing out loud",
+        "as soon as possible", "oh my God",
+        "talk to you later", "I don't know", "never mind"
+    };
+
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5006);
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    bind(s, (struct sockaddr *)&server, sizeof(server));
+
+    printf("UDP translator server waiting...\n");
+
+    recvfrom(s, msg, sizeof(msg) - 1, 0,
+             (struct sockaddr *)&client, &len);
+
+    msg[1023] = '\0';
+    result[0] = '\0';
+
+    word = strtok(msg, " \n");
+
+    while(word != NULL)
+    {
+        int found = 0;
+
+        for(i = 0; i < 11; i++)
+        {
+            if(strcmp(word, shortform[i]) == 0)
+            {
+                strcat(result, meaning[i]);
+                found = 1;
+                break;
+            }
+        }
+
+        if(!found)
+            strcat(result, word);
+
+        strcat(result, " ");
+        word = strtok(NULL, " \n");
+    }
+
+    sendto(s, result, strlen(result) + 1, 0,
+           (struct sockaddr *)&client, len);
+
+    printf("Translated: %s\n", result);
+
+    close(s);
+    return 0;
+}
+
+
+CLIENT: exp6_client.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int s;
+    char msg[1024], result[1024];
+    struct sockaddr_in server;
+    socklen_t len = sizeof(server);
+
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5006);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    printf("Enter a sentence: ");
+    fgets(msg, sizeof(msg), stdin);
+
+    sendto(s, msg, strlen(msg) + 1, 0,
+           (struct sockaddr *)&server, sizeof(server));
+
+    recvfrom(s, result, sizeof(result), 0,
+             (struct sockaddr *)&server, &len);
+
+    printf("Translated sentence: %s\n", result);
+
+    close(s);
+    return 0;
+}
+
+COMPILE AND RUN
+---------------
+gcc exp6_server.c -o server
+gcc exp6_client.c -o client
+
+Terminal 1: ./server
+Terminal 2: ./client
+
+Example input:
+tbh ig will come asap
+
+Example output:
+to be honest I guess will come as soon as possible
+
+
+============================================================
+EXPERIMENT 7
+MULTI-USER CHAT SERVER USING TCP
+============================================================
+
+SERVER: exp7_server.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+
+int main()
+{
+    int s, c, clients[10], i, max, activity;
+    char msg[1024];
+    fd_set readfds;
+    struct sockaddr_in server, client;
+    socklen_t len = sizeof(client);
+
+    for(i = 0; i < 10; i++)
+        clients[i] = 0;
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    int opt = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5007);
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    bind(s, (struct sockaddr *)&server, sizeof(server));
+    listen(s, 5);
+
+    printf("Chat server waiting...\n");
+
+    while(1)
+    {
+        FD_ZERO(&readfds);
+        FD_SET(s, &readfds);
+        max = s;
+
+        for(i = 0; i < 10; i++)
+        {
+            if(clients[i] > 0)
+                FD_SET(clients[i], &readfds);
+
+            if(clients[i] > max)
+                max = clients[i];
+        }
+
+        activity = select(max + 1, &readfds, NULL, NULL, NULL);
+
+        if(FD_ISSET(s, &readfds))
+        {
+            c = accept(s, (struct sockaddr *)&client, &len);
+
+            for(i = 0; i < 10; i++)
+            {
+                if(clients[i] == 0)
+                {
+                    clients[i] = c;
+                    printf("Client connected\n");
+                    break;
+                }
+            }
+
+            if(i == 10)
+                close(c);
+        }
+
+        for(i = 0; i < 10; i++)
+        {
+            c = clients[i];
+
+            if(c > 0 && FD_ISSET(c, &readfds))
+            {
+                int n = recv(c, msg, sizeof(msg) - 1, 0);
+
+                if(n <= 0)
+                {
+                    printf("Client disconnected\n");
+                    close(c);
+                    clients[i] = 0;
+                }
+                else
+                {
+                    msg[n] = '\0';
+                    printf("Message: %s\n", msg);
+
+                    int j;
+                    for(j = 0; j < 10; j++)
+                    {
+                        if(clients[j] > 0 && clients[j] != c)
+                            send(clients[j], msg, n, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    close(s);
+    return 0;
+}
+
+
+CLIENT: exp7_client.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/select.h>
+
+int main()
+{
+    int s;
+    char msg[1024];
+    fd_set readfds;
+    struct sockaddr_in server;
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5007);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    connect(s, (struct sockaddr *)&server, sizeof(server));
+
+    printf("Connected to chat. Type messages.\n");
+
+    while(1)
+    {
+        FD_ZERO(&readfds);
+        FD_SET(0, &readfds);
+        FD_SET(s, &readfds);
+
+        select(s + 1, &readfds, NULL, NULL, NULL);
+
+        if(FD_ISSET(0, &readfds))
+        {
+            if(fgets(msg, sizeof(msg), stdin) == NULL)
+                break;
+
+            send(s, msg, strlen(msg), 0);
+        }
+
+        if(FD_ISSET(s, &readfds))
+        {
+            int n = recv(s, msg, sizeof(msg) - 1, 0);
+
+            if(n <= 0)
+            {
+                printf("Server disconnected\n");
+                break;
+            }
+
+            msg[n] = '\0';
+            printf("Other client: %s", msg);
+        }
+    }
+
+    close(s);
+    return 0;
+}
+
+COMPILE AND RUN
+---------------
+gcc exp7_server.c -o server
+gcc exp7_client.c -o client
+
+Terminal 1: ./server
+Terminal 2: ./client
+Terminal 3: ./client
+
+Messages from one client are sent to the other connected clients.
+
+
+============================================================
+EXPERIMENT 8
+CONCURRENT TIME SERVER USING UDP
+============================================================
+
+SERVER: exp8_server.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+
+int main()
+{
+    int s;
+    char msg[100];
+    time_t now;
+    struct sockaddr_in server, client;
+    socklen_t len = sizeof(client);
+
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5008);
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    bind(s, (struct sockaddr *)&server, sizeof(server));
+
+    printf("UDP time server waiting...\n");
+
+    while(1)
+    {
+        recvfrom(s, msg, sizeof(msg), 0,
+                 (struct sockaddr *)&client, &len);
+
+        if(fork() == 0)
+        {
+            now = time(NULL);
+            strcpy(msg, ctime(&now));
+
+            sendto(s, msg, strlen(msg) + 1, 0,
+                   (struct sockaddr *)&client, len);
+
+            close(s);
+            return 0;
+        }
+
+        waitpid(-1, NULL, WNOHANG);
+    }
+
+    close(s);
+    return 0;
+}
+
+
+CLIENT: exp8_client.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int s;
+    char msg[100] = "TIME";
+    struct sockaddr_in server;
+    socklen_t len = sizeof(server);
+
+    s = socket(AF_INET, SOCK_DGRAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5008);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    sendto(s, msg, strlen(msg) + 1, 0,
+           (struct sockaddr *)&server, sizeof(server));
+
+    recvfrom(s, msg, sizeof(msg), 0,
+             (struct sockaddr *)&server, &len);
+
+    printf("Server time: %s", msg);
+
+    close(s);
+    return 0;
+}
+
+COMPILE AND RUN
+---------------
+gcc exp8_server.c -o server
+gcc exp8_client.c -o client
+
+Terminal 1: ./server
+Terminal 2: ./client
+
+Open multiple client terminals to request the time.
+
+
+============================================================
+EXPERIMENT 9
+CONCURRENT FILE SERVER USING TCP
+============================================================
+
+SERVER: exp9_server.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+
+int main()
+{
+    int s, c;
+    char filename[100], buffer[1024];
+    FILE *fp;
+    struct sockaddr_in server, client;
+    socklen_t len = sizeof(client);
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    int opt = 1;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5009);
+    server.sin_addr.s_addr = INADDR_ANY;
+
+    bind(s, (struct sockaddr *)&server, sizeof(server));
+    listen(s, 5);
+
+    printf("File server waiting...\n");
+
+    while(1)
+    {
+        c = accept(s, (struct sockaddr *)&client, &len);
+
+        if(fork() == 0)
+        {
+            close(s);
+
+            int n = recv(c, filename, sizeof(filename) - 1, 0);
+            if(n <= 0)
+            {
+                close(c);
+                return 0;
+            }
+
+            filename[n] = '\0';
+            fp = fopen(filename, "r");
+
+            if(fp == NULL)
+            {
+                strcpy(buffer, "ERROR: File not found\n");
+                send(c, buffer, strlen(buffer), 0);
+            }
+            else
+            {
+                while((n = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+                    send(c, buffer, n, 0);
+
+                fclose(fp);
+            }
+
+            close(c);
+            return 0;
+        }
+
+        close(c);
+        waitpid(-1, NULL, WNOHANG);
+    }
+
+    close(s);
+    return 0;
+}
+
+
+CLIENT: exp9_client.c
+---------------------
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+
+int main()
+{
+    int s, n;
+    char filename[100], buffer[1024];
+    struct sockaddr_in server;
+
+    s = socket(AF_INET, SOCK_STREAM, 0);
+
+    server.sin_family = AF_INET;
+    server.sin_port = htons(5009);
+    server.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    connect(s, (struct sockaddr *)&server, sizeof(server));
+
+    printf("Enter filename: ");
+    scanf("%99s", filename);
+
+    send(s, filename, strlen(filename), 0);
+
+    printf("\nFile contents:\n");
+
+    while((n = recv(s, buffer, sizeof(buffer) - 1, 0)) > 0)
+    {
+        buffer[n] = '\0';
+        printf("%s", buffer);
+    }
+
+    printf("\n");
+    close(s);
+    return 0;
+}
+
+COMPILE AND RUN
+---------------
+gcc exp9_server.c -o server
+gcc exp9_client.c -o client
+
+Create a sample file in the server's folder:
+echo "Hello from the file server" > sample.txt
+
+Terminal 1: ./server
+Terminal 2: ./client
+Enter filename: sample.txt
+
+NOTE:
+The server sends files from its current working directory.
+For a lab demonstration, use a simple text file.
+
+
+============================================================
+EXPERIMENT 10
+PACKET CAPTURING APPLICATION USING RAW SOCKETS
+============================================================
+
+SINGLE PROGRAM: exp10.c
+-----------------------
+#include <stdio.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/ip.h>
+#include <netinet/if_ether.h>
+
+int main()
+{
+    int s, n;
+    char buffer[65536];
+
+    s = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+
+    if(s < 0)
+    {
+        perror("Socket");
+        return 1;
+    }
+
+    printf("Packet capturing started...\n");
+
+    while(1)
+    {
+        n = recvfrom(s, buffer, sizeof(buffer), 0, NULL, NULL);
+
+        if(n > 0)
+        {
+            struct ethhdr *eth = (struct ethhdr *)buffer;
+
+            if(ntohs(eth->h_proto) == ETH_P_IP)
+            {
+                struct iphdr *ip =
+                    (struct iphdr *)(buffer + sizeof(struct ethhdr));
+
+                char src[INET_ADDRSTRLEN];
+                char dst[INET_ADDRSTRLEN];
+
+                inet_ntop(AF_INET, &ip->saddr, src, sizeof(src));
+                inet_ntop(AF_INET, &ip->daddr, dst, sizeof(dst));
+
+                printf("\\nPacket captured\\n");
+                printf("Source IP      : %s\\n", src);
+                printf("Destination IP : %s\\n", dst);
+                printf("Protocol       : %d\\n", ip->protocol);
+                printf("Packet length  : %d bytes\\n", ntohs(ip->tot_len));
+            }
+        }
+    }
+
+    close(s);
+    return 0;
+}
+
+COMPILE AND RUN
+---------------
+gcc exp10.c -o sniffer
+sudo ./sniffer
+
+Only one program is required for this experiment.
+It captures IP packets passing through the network interface.
+Press Ctrl+C to stop packet capturing.
+Raw packet sockets require administrator privileges.
+
+
+============================================================
+QUICK REVISION: IMPORTANT FUNCTIONS
+============================================================
+
+TCP:
+socket()   - Creates a socket.
+bind()     - Assigns IP address and port to the server.
+listen()   - Waits for client connections.
+accept()   - Accepts a client connection.
+connect()  - Connects the client to the server.
+send()     - Sends data.
+recv()     - Receives data.
+close()    - Closes the socket.
+
+UDP:
+socket()   - Creates a UDP socket.
+bind()     - Assigns server port.
+sendto()   - Sends data with destination address.
+recvfrom() - Receives data and sender address.
+close()    - Closes the socket.
+
+OTHER:
+fork()     - Creates a child process.
+select()   - Monitors multiple sockets.
+waitpid()  - Collects child process status.
+fopen()    - Opens a file.
+fread()    - Reads file contents.
+fclose()   - Closes a file.
+
+PORT NUMBERS USED
+-----------------
+Experiment 5  : 5005
+Experiment 6  : 5006
+Experiment 7  : 5007
+Experiment 8  : 5008
+Experiment 9  : 5009
+Experiment 10 : UDP test packet to port 9000
+
+TROUBLESHOOTING
+---------------
+1. If bind says "Address already in use", stop the old server:
+   Press Ctrl+C in the server terminal, then run it again.
+
+2. Always start the server before starting the client.
+
+3. If the client cannot connect, check the IP address and port number.
+
+4. For Experiment 10, use sudo to run the sniffer.
+
+5. Compile each server and client separately. Do not compile both
+   files into one executable.
